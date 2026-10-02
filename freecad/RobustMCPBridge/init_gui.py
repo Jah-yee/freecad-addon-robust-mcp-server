@@ -153,7 +153,7 @@ FreeCADGui.addWorkbench(FreecadRobustMCPBridgeWorkbench())
 try:
     try:
         from PySide2 import QtCore
-    except ImportError:
+    except (ImportError, NameError):
         from PySide6 import QtCore
 
     def _deferred_status_bar_sync() -> None:

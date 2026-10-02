@@ -134,12 +134,12 @@ def _get_qt_core() -> Any:
         return None
 
     # Try PySide2 first, then PySide6
-    with contextlib.suppress(ImportError):
+    with contextlib.suppress(ImportError, NameError):
         from PySide2 import QtCore
 
         return QtCore
 
-    with contextlib.suppress(ImportError):
+    with contextlib.suppress(ImportError, NameError):
         from PySide6 import QtCore
 
         return QtCore
@@ -671,10 +671,10 @@ class FreecadMCPPlugin:
             # GUI mode: use Qt timer for thread-safe GUI operations
             try:
                 from PySide2 import QtCore
-            except ImportError:
+            except (ImportError, NameError):
                 try:
                     from PySide6 import QtCore
-                except ImportError:
+                except (ImportError, NameError):
                     QtCore = None  # type: ignore[assignment]
 
             if QtCore is not None:
