@@ -23,10 +23,13 @@ import runpy
 import sys
 import types
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 ADDON_DIR = Path(__file__).parent.parent.parent.parent / "freecad" / "RobustMCPBridge"
 INIT_GUI_PATH = ADDON_DIR / "init_gui.py"
@@ -40,6 +43,19 @@ class _NameErrorModule(types.ModuleType):
     """
 
     def __getattr__(self, name: str) -> Any:
+        """Raise on every attribute lookup.
+
+        Args:
+            name: The attribute that was looked up.
+
+        Returns:
+            Never returns; the method always raises.
+
+        Raises:
+            NameError: If ``name`` starts with ``Qt``, mimicking a PySide2
+                shim whose submodules are not bound yet.
+            AttributeError: For any other attribute name.
+        """
         if name.startswith("Qt"):
             raise NameError(f"name '{name}' is not defined")
         raise AttributeError(name)
@@ -68,13 +84,23 @@ def _pyside2_importerror() -> None:
 
 
 @pytest.fixture
-def server_mod(monkeypatch: pytest.MonkeyPatch) -> Any:
-    """Import the bundled bridge server module in isolation."""
+def server_mod(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
+    """Import the bundled bridge server module in isolation.
+
+    The package is dropped from ``sys.modules`` before the import so that a
+    cached copy from another test cannot be reused.  Any module the import
+    adds is removed again on teardown, because ``monkeypatch`` only restores
+    the entries it deleted itself.
+    """
     monkeypatch.syspath_prepend(str(ADDON_DIR))
     for name in list(sys.modules):
         if name == "freecad_mcp_bridge" or name.startswith("freecad_mcp_bridge."):
             monkeypatch.delitem(sys.modules, name, raising=False)
-    return importlib.import_module("freecad_mcp_bridge.server")
+    module = importlib.import_module("freecad_mcp_bridge.server")
+    yield module
+    for name in list(sys.modules):
+        if name == "freecad_mcp_bridge" or name.startswith("freecad_mcp_bridge."):
+            del sys.modules[name]
 
 
 @pytest.fixture
@@ -206,6 +232,7 @@ class TestStartQueueProcessor:
         assert plugin._headless is False
         assert threads == []
         timer.start.assert_called_once_with(server_mod.QUEUE_POLL_INTERVAL_MS)
+        timer.timeout.connect.assert_called_once_with(plugin._process_queue)
 
     def test_nameerror_on_both_uses_background_thread(
         self,
