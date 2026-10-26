@@ -192,9 +192,18 @@ try:
     )
 
     if FreeCAD.GuiUp:
-        # GUI is already up - start bridge directly
-        FreeCAD.Console.PrintMessage("Startup Bridge: GUI already up, starting...\n")
-        _start_bridge()
+        if QtCore is None:
+            # Never start a GUI bridge without a main-thread Qt timer.
+            FreeCAD.Console.PrintError(
+                "Startup Bridge: GUI is ready, but neither PySide2 nor PySide6 "
+                "could be loaded. Startup was stopped.\n"
+            )
+        else:
+            # GUI is already up - start bridge directly
+            FreeCAD.Console.PrintMessage(
+                "Startup Bridge: GUI already up, starting...\n"
+            )
+            _start_bridge()
     elif _is_true_headless:
         # True headless mode - QCoreApplication exists but not QApplication
         # No Qt event loop for GUI, so start bridge directly with background thread

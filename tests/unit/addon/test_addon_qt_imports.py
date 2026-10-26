@@ -18,6 +18,7 @@ These tests cover:
 
 from __future__ import annotations
 
+import ast
 import importlib
 import runpy
 import sys
@@ -405,8 +406,22 @@ class TestInitGuiQtFallback:
 
 
 def test_startup_script_handles_partially_initialized_pyside2() -> None:
-    """The integration startup script should also reach its PySide6 fallback."""
+    """The integration script should support Qt6 and fail closed without Qt."""
     startup_code = STARTUP_BRIDGE_PATH.read_text()
 
     assert "except (ImportError, NameError)" in startup_code
     assert "suppress(ImportError, NameError)" in startup_code
+
+    tree = ast.parse(startup_code)
+    gui_up_branch = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Attribute)
+        and node.test.attr == "GuiUp"
+    )
+    branch_code = "\n".join(ast.unparse(node) for node in gui_up_branch.body)
+
+    assert "if QtCore is None" in branch_code
+    assert "Startup was stopped" in branch_code
+    assert branch_code.count("_start_bridge()") == 1
