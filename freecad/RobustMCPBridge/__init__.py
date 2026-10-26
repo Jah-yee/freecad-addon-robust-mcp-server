@@ -157,8 +157,8 @@ try:
 
         try:
             from PySide2 import QtCore, QtWidgets  # type: ignore[assignment, no-redef]
-        except ImportError:
-            with contextlib.suppress(ImportError):
+        except (ImportError, NameError):
+            with contextlib.suppress(ImportError, NameError):
                 from PySide6 import (  # type: ignore[assignment, no-redef]
                     QtCore,
                     QtWidgets,
@@ -200,8 +200,11 @@ try:
                 _auto_start_timer.timeout.connect(_auto_start_bridge)
                 _auto_start_timer.start(1000)
             else:
-                # GUI is up but Qt import failed - start directly
-                _auto_start_bridge()
+                # Never start a GUI bridge without a main-thread Qt timer.
+                FreeCAD.Console.PrintError(
+                    "Robust MCP Bridge: GUI is ready, but neither PySide2 nor "
+                    "PySide6 could be loaded. Auto-start was stopped.\n"
+                )
         elif _is_true_headless:
             # True headless mode - QCoreApplication exists but not QApplication
             # No Qt event loop for GUI, so start bridge directly with background thread

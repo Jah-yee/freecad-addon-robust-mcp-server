@@ -1,5 +1,12 @@
 # Robust MCP Bridge Workbench Release Notes
 
+## Unreleased
+
+### Fixed
+
+- **Qt6 startup compatibility**: The bridge now falls back to PySide6 when a present but partially initialized PySide2 compatibility module raises `NameError`.
+- **GUI thread safety during startup**: A GUI bridge now refuses to start if neither supported Qt binding can provide the main-thread queue timer. Background queue processing remains limited to genuine headless sessions.
+
 ## Version 0.6.2 (2026-01-18)
 
 This release fixes some auto-start issues and improves the overall startup experience across all supported modes.

@@ -311,7 +311,12 @@ class FreecadMCPPlugin:
         }
 
     def start(self) -> None:
-        """Start all servers."""
+        """Start all servers.
+
+        Raises:
+            RuntimeError: If GUI mode is active but no supported Qt binding can
+                provide the main-thread queue timer.
+        """
         if self._running:
             return
 
@@ -326,8 +331,13 @@ class FreecadMCPPlugin:
                 flush=True,
             )
 
-        # Start the queue processing timer on the main thread
-        self._start_queue_processor()
+        # Start queue processing before opening either listener. If GUI queue
+        # setup fails, leave the plugin stopped and refuse incoming requests.
+        try:
+            self._start_queue_processor()
+        except Exception:
+            self._running = False
+            raise
 
         # Start socket server
         self._socket_thread = threading.Thread(
@@ -654,9 +664,11 @@ class FreecadMCPPlugin:
         queue on the main thread—required because Qt widgets must only be
         touched from the thread that owns them.
 
-        In headless mode (``FreeCAD.GuiUp`` is False, or Qt is unavailable)
-        a daemon background thread polls the queue instead.  No QTimer is
-        created, so no timer cleanup is needed at shutdown.
+        In headless mode (``FreeCAD.GuiUp`` is False) a daemon background
+        thread polls the queue instead. No QTimer is created, so no timer
+        cleanup is needed at shutdown. If GUI mode is active but neither Qt
+        binding is usable, startup fails rather than processing GUI-sensitive
+        work from a background thread.
 
         Note: The timer created here is destroyed during shutdown by
         ``_cleanup_for_exit`` (via ``shiboken.delete()``) or by ``stop()``
@@ -669,20 +681,21 @@ class FreecadMCPPlugin:
 
         if gui_available:
             # GUI mode: use Qt timer for thread-safe GUI operations
-            try:
-                from PySide2 import QtCore
-            except (ImportError, NameError):
-                try:
-                    from PySide6 import QtCore
-                except (ImportError, NameError):
-                    QtCore = None  # type: ignore[assignment]
+            QtCore = _get_qt_core()
+            if QtCore is None:
+                message = (
+                    "MCP Bridge cannot start in GUI mode because neither "
+                    "PySide2 nor PySide6 QtCore could be loaded. Refusing "
+                    "unsafe background queue processing."
+                )
+                FreeCAD.Console.PrintError(f"{message}\n")
+                raise RuntimeError(message)
 
-            if QtCore is not None:
-                timer = QtCore.QTimer()
-                timer.timeout.connect(self._process_queue)
-                timer.start(QUEUE_POLL_INTERVAL_MS)
-                self._timer = timer
-                return
+            timer = QtCore.QTimer()
+            timer.timeout.connect(self._process_queue)
+            timer.start(QUEUE_POLL_INTERVAL_MS)
+            self._timer = timer
+            return
 
         # Headless mode: use a background thread for queue processing
         # In headless mode, there's no GUI thread concern, so direct

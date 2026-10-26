@@ -10,7 +10,7 @@ These tests cover:
 * ``_get_qt_core``: PySide2 ``NameError`` falls back to PySide6, and both
   failures return ``None``.
 * ``_start_queue_processor``: PySide2 ``NameError`` falls back to the Qt
-  timer, and both failures use the background-thread path.
+  timer, while both failures make GUI startup fail closed.
 * ``init_gui.py``: a PySide2 ``NameError`` reaches the PySide6 fallback, and
   failure of both imports reaches the existing startup fallback (the warning
   logged by the outer ``except`` block).
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 
 ADDON_DIR = Path(__file__).parent.parent.parent.parent / "freecad" / "RobustMCPBridge"
 INIT_GUI_PATH = ADDON_DIR / "init_gui.py"
+STARTUP_BRIDGE_PATH = ADDON_DIR / "freecad_mcp_bridge" / "startup_bridge.py"
 
 
 class _NameErrorModule(types.ModuleType):
@@ -73,7 +74,7 @@ def _pyside2_nameerror() -> types.ModuleType:
     return _NameErrorModule("PySide2")
 
 
-def _pyside2_importerror() -> None:
+def _pyside2_importerror() -> Any:
     """Make ``from PySide2 import ...`` raise ``ImportError``."""
     return None
 
@@ -234,25 +235,54 @@ class TestStartQueueProcessor:
         timer.start.assert_called_once_with(server_mod.QUEUE_POLL_INTERVAL_MS)
         timer.timeout.connect.assert_called_once_with(plugin._process_queue)
 
-    def test_nameerror_on_both_uses_background_thread(
+    @pytest.mark.parametrize(
+        "failed_binding",
+        [_pyside2_nameerror, _pyside2_importerror],
+        ids=["nameerror", "importerror"],
+    )
+    def test_gui_mode_without_qt_fails_closed(
+        self,
+        server_mod: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        fake_freecad: Any,
+        failed_binding: Any,
+    ) -> None:
+        """GUI mode must not fall back to unsafe background processing."""
+        _enable_gui(server_mod, monkeypatch, fake_freecad)
+        monkeypatch.setitem(sys.modules, "PySide2", failed_binding())
+        monkeypatch.setitem(sys.modules, "PySide6", _NameErrorModule("PySide6"))
+        threads = self._fake_thread(monkeypatch)
+
+        plugin = self._plugin(server_mod)
+        with pytest.raises(RuntimeError, match="Refusing unsafe background"):
+            plugin._start_queue_processor()
+
+        assert plugin._timer is None
+        assert plugin._headless is False
+        assert plugin._queue_thread is None
+        assert threads == []
+        fake_freecad.Console.PrintError.assert_called_once()
+
+    def test_start_rolls_back_running_state_when_gui_qt_is_unavailable(
         self,
         server_mod: Any,
         monkeypatch: pytest.MonkeyPatch,
         fake_freecad: Any,
     ) -> None:
-        """If no Qt binding is usable the background thread path is taken."""
+        """A failed GUI queue setup must leave the plugin fully stopped."""
         _enable_gui(server_mod, monkeypatch, fake_freecad)
         monkeypatch.setitem(sys.modules, "PySide2", _pyside2_nameerror())
         monkeypatch.setitem(sys.modules, "PySide6", _NameErrorModule("PySide6"))
-        threads = self._fake_thread(monkeypatch)
 
-        plugin = self._plugin(server_mod)
-        plugin._start_queue_processor()
+        plugin = server_mod.FreecadMCPPlugin(enable_xmlrpc=True)
+        with pytest.raises(RuntimeError, match="Refusing unsafe background"):
+            plugin.start()
 
+        assert plugin.is_running is False
         assert plugin._timer is None
-        assert plugin._headless is True
-        assert len(threads) == 1
-        assert threads[0].started is True
+        assert plugin._queue_thread is None
+        assert plugin._socket_thread is None
+        assert plugin._xmlrpc_thread is None
 
     def test_headless_mode_uses_background_thread(
         self,
@@ -372,3 +402,11 @@ class TestInitGuiQtFallback:
         assert not any(
             "Could not schedule status bar sync" in msg for msg in _warnings(freecad)
         )
+
+
+def test_startup_script_handles_partially_initialized_pyside2() -> None:
+    """The integration startup script should also reach its PySide6 fallback."""
+    startup_code = STARTUP_BRIDGE_PATH.read_text()
+
+    assert "except (ImportError, NameError)" in startup_code
+    assert "suppress(ImportError, NameError)" in startup_code

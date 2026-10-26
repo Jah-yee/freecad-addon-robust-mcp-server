@@ -407,6 +407,28 @@ class TestAutoStartCodePaths:
         pyside6_pos = init_code.find("PySide6")
         assert pyside2_pos < pyside6_pos, "Should try PySide2 before PySide6"
 
+    def test_gui_without_qt_fails_closed(self, init_code: str) -> None:
+        """A ready GUI without Qt bindings must not start the bridge directly."""
+        tree = ast.parse(init_code)
+        gui_up_branch = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.If)
+            and isinstance(node.test, ast.Attribute)
+            and node.test.attr == "GuiUp"
+        )
+        branch_code = "\n".join(ast.unparse(node) for node in gui_up_branch.body)
+
+        assert "Auto-start was stopped" in branch_code
+        assert branch_code.count("_auto_start_bridge()") == 0
+
+    def test_qt_fallback_handles_partially_initialized_binding(
+        self, init_code: str
+    ) -> None:
+        """PySide probes should tolerate the NameError seen on Qt6 builds."""
+        assert "except (ImportError, NameError)" in init_code
+        assert "suppress(ImportError, NameError)" in init_code
+
     def test_true_headless_detection_via_isinstance(self, init_code: str) -> None:
         """Should use isinstance to detect true headless mode.
 
