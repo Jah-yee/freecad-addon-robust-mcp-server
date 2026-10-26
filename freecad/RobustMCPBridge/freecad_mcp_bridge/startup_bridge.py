@@ -231,11 +231,12 @@ try:
         )
         _gui_waiter.start()
     else:
-        # No Qt available at all - unusual state, start directly
-        FreeCAD.Console.PrintMessage(
-            "Startup Bridge: No Qt available, starting directly...\n"
+        # Without Qt, GuiUp=False cannot distinguish early GUI startup
+        # from a genuinely headless process. Refuse the ambiguous path.
+        FreeCAD.Console.PrintError(
+            "Startup Bridge: No Qt binding is available and headless mode "
+            "could not be confirmed. Startup was stopped.\n"
         )
-        _start_bridge()
 except Exception as e:
     FreeCAD.Console.PrintError(f"Startup Bridge: Failed to initialize: {e}\n")
     FreeCAD.Console.PrintError(traceback.format_exc())

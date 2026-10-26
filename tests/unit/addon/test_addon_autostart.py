@@ -377,13 +377,13 @@ class TestAutoStartCodePaths:
         1. GUI already up - use timer for deferred start
         2. True headless (QCoreApplication only) - start directly with background thread
         3. GUI not ready but Qt available - use GuiWaiter
-        4. No Qt available - start directly (unusual state)
+        4. No Qt available - stop because headless mode is unconfirmed
         """
         # Check for documentation of scenarios
         assert "GuiUp is True" in init_code or "GUI is already up" in init_code
         assert "QCoreApplication" in init_code  # True headless detection
         assert "GUI not ready" in init_code
-        assert "No Qt available" in init_code or "headless" in init_code.lower()
+        assert "No Qt binding" in init_code
 
     def test_all_paths_have_logging(self, init_code: str) -> None:
         """Each code path should have diagnostic logging."""
@@ -392,7 +392,7 @@ class TestAutoStartCodePaths:
             "GUI already up",
             "True headless mode",
             "GUI not ready",
-            "No Qt available",
+            "No Qt binding",
         ]
         found = sum(1 for pattern in log_patterns if pattern in init_code)
         assert found >= 4, f"Expected 4 code paths with logging, found {found}"
@@ -421,6 +421,23 @@ class TestAutoStartCodePaths:
 
         assert "Auto-start was stopped" in branch_code
         assert branch_code.count("_auto_start_bridge()") == 0
+
+    def test_unconfirmed_headless_mode_fails_closed(self, init_code: str) -> None:
+        """No Qt plus GuiUp false must not be treated as proven headless mode."""
+        tree = ast.parse(init_code)
+        startup_branch = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.If)
+            and isinstance(node.test, ast.Attribute)
+            and node.test.attr == "GuiUp"
+        )
+        while startup_branch.orelse and isinstance(startup_branch.orelse[0], ast.If):
+            startup_branch = startup_branch.orelse[0]
+        fallback_code = "\n".join(ast.unparse(node) for node in startup_branch.orelse)
+
+        assert "headless mode could not be confirmed" in fallback_code
+        assert "_auto_start_bridge()" not in fallback_code
 
     def test_qt_fallback_handles_partially_initialized_binding(
         self, init_code: str

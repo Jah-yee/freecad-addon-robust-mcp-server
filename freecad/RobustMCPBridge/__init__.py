@@ -232,11 +232,12 @@ try:
             )
             _gui_waiter.start()
         else:
-            # No Qt available at all - unusual state, start directly
-            FreeCAD.Console.PrintMessage(
-                "Robust MCP Bridge: No Qt available, starting directly...\n"
+            # Without Qt, GuiUp=False cannot distinguish early GUI startup
+            # from a genuinely headless process. Refuse the ambiguous path.
+            FreeCAD.Console.PrintError(
+                "Robust MCP Bridge: No Qt binding is available and headless "
+                "mode could not be confirmed. Auto-start was stopped.\n"
             )
-            _auto_start_bridge()
 except Exception as e:
     FreeCAD.Console.PrintWarning(f"Could not set up auto-start: {e}\n")
     import traceback

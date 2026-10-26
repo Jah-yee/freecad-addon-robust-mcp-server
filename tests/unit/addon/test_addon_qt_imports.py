@@ -425,3 +425,10 @@ def test_startup_script_handles_partially_initialized_pyside2() -> None:
     assert "if QtCore is None" in branch_code
     assert "Startup was stopped" in branch_code
     assert branch_code.count("_start_bridge()") == 1
+
+    while gui_up_branch.orelse and isinstance(gui_up_branch.orelse[0], ast.If):
+        gui_up_branch = gui_up_branch.orelse[0]
+    fallback_code = "\n".join(ast.unparse(node) for node in gui_up_branch.orelse)
+
+    assert "headless mode could not be confirmed" in fallback_code
+    assert "_start_bridge()" not in fallback_code
